@@ -1,0 +1,184 @@
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+  UnauthorizedException,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { JwtService } from '@nestjs/jwt';
+import type { CookieOptions } from 'express';
+import * as bcrypt from 'bcrypt';
+import { UsersService } from '../users/users.service';
+import { User } from '../users/entities/user.entity';
+import { LoginDto } from './dto/login.dto';
+import { JwtPayload } from './interfaces/jwt-payload.interface';
+
+@Injectable()
+export class AuthService {
+  constructor(
+    private readonly usersService: UsersService,
+    private readonly jwtService: JwtService,
+    private readonly configService: ConfigService,
+  ) {}
+
+  async login(loginDto: LoginDto) {
+    const user = await this.validateUser(loginDto.email, loginDto.password);
+
+    return this.buildAuthResponse(user);
+  }
+
+  async refresh(refreshToken: string) {
+    if (!refreshToken) {
+      throw new UnauthorizedException('Refresh token não informado.');
+    }
+
+    let payload: JwtPayload;
+
+    try {
+      payload = await this.jwtService.verifyAsync<JwtPayload>(refreshToken, {
+        secret: this.configService.get<string>(
+          'JWT_REFRESH_SECRET',
+          'change_this_refresh_secret',
+        ),
+      });
+    } catch {
+      throw new UnauthorizedException('Refresh token inválido ou expirado.');
+    }
+
+    if (payload.type !== 'refresh') {
+      throw new UnauthorizedException('Refresh token inválido.');
+    }
+
+    const user = await this.usersService.findEntityById(payload.sub);
+
+    if (!user.active) {
+      throw new UnauthorizedException('Usuário inativo.');
+    }
+
+    return this.buildAuthResponse(user);
+  }
+
+  async getAuthenticatedUser(userId: number) {
+    const user = await this.usersService.findEntityById(userId);
+
+    if (!user.active) {
+      throw new UnauthorizedException('Usuário inativo.');
+    }
+
+    return this.usersService.toPublicUser(user);
+  }
+
+  getRefreshCookieOptions(): CookieOptions {
+    return {
+      httpOnly: true,
+      sameSite: 'lax',
+      secure: this.configService.get<string>('NODE_ENV') === 'production',
+      path: '/auth',
+    };
+  }
+
+  getRefreshCookieMaxAge() {
+    return Number(
+      this.configService.get<string>('JWT_REFRESH_COOKIE_MAX_AGE_MS', '604800000'),
+    );
+  }
+
+  private async validateUser(email: string, password: string) {
+    const user = await this.usersService.findByEmail(email);
+
+    if (!user) {
+      throw new NotFoundException({
+        code: 'USER_NOT_FOUND',
+        message: 'Usuário não encontrado.',
+      });
+    }
+
+    if (!user.active) {
+      throw new ForbiddenException({
+        code: 'INACTIVE_USER',
+        message: 'Usuário inativo.',
+      });
+    }
+
+    const passwordMatches = await bcrypt.compare(password, user.password);
+
+    if (!passwordMatches) {
+      throw new UnauthorizedException({
+        code: 'INVALID_PASSWORD',
+        message: 'Senha incorreta.',
+      });
+    }
+
+    return user;
+  }
+
+  private async buildAuthResponse(user: User) {
+    const payload: JwtPayload = {
+      sub: user.id,
+      email: user.email,
+      role: user.role,
+    };
+    const accessExpiresIn = this.configService.get<string>(
+      'JWT_ACCESS_EXPIRES_IN',
+      '60s',
+    );
+    const refreshExpiresIn = this.configService.get<string>(
+      'JWT_REFRESH_EXPIRES_IN',
+      '7d',
+    );
+    const accessToken = await this.jwtService.signAsync(payload, {
+      secret: this.configService.get<string>(
+        'JWT_ACCESS_SECRET',
+        'change_this_access_secret',
+      ),
+      expiresIn: accessExpiresIn,
+    });
+    const refreshToken = await this.jwtService.signAsync(
+      {
+        ...payload,
+        type: 'refresh',
+      },
+      {
+        secret: this.configService.get<string>(
+          'JWT_REFRESH_SECRET',
+          'change_this_refresh_secret',
+        ),
+        expiresIn: refreshExpiresIn,
+      },
+    );
+
+    return {
+      tokenType: 'Bearer',
+      accessToken,
+      refreshToken,
+      accessTokenExpiresIn: this.toSeconds(accessExpiresIn),
+      user: await this.usersService.toPublicUser(user),
+    };
+  }
+
+  private toSeconds(value: string) {
+    if (/^\d+$/.test(value)) {
+      return Number(value);
+    }
+
+    const amount = Number(value.slice(0, -1));
+    const unit = value.slice(-1);
+
+    if (Number.isNaN(amount)) {
+      return 60;
+    }
+
+    switch (unit) {
+      case 's':
+        return amount;
+      case 'm':
+        return amount * 60;
+      case 'h':
+        return amount * 60 * 60;
+      case 'd':
+        return amount * 60 * 60 * 24;
+      default:
+        return 60;
+    }
+  }
+}
