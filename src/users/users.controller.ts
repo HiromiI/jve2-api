@@ -22,7 +22,7 @@ import { UsersService } from './users.service';
 type AuthenticatedRequest = Request & {
   user: {
     userId: number;
-    email: string;
+    email: string | null;
     role: UserRole;
   };
 };
@@ -54,6 +54,11 @@ export class UsersController {
     @Req() request: AuthenticatedRequest,
   ) {
     return this.usersService.update(id, updateUserDto, request.user.userId);
+  }
+
+  @Delete('account-deletion')
+  deleteAccount(@Req() request: AuthenticatedRequest) {
+    return this.usersService.deleteAccount(request.user.userId);
   }
 
   @Delete(':id')

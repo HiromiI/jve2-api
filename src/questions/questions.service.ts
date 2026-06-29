@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   InternalServerErrorException,
   Injectable,
   NotFoundException,
@@ -17,6 +18,7 @@ import { ListQuestionsQueryDto } from './dto/list-questions-query.dto';
 import { UpdateQuestionDto } from './dto/update-question.dto';
 import { QuestionSkill } from './entities/question-skill.entity';
 import { Question } from './entities/question.entity';
+import type { QuestionImageFile } from './interfaces/question-image-file.interface';
 import type { QuestionUploadedFiles } from './questions.controller';
 import { QuestionsStorageService } from './questions-storage.service';
 
@@ -29,6 +31,9 @@ export type PublicQuestion = Question & {
   skillIds: number[];
   skills: SkillSummary[];
 };
+
+type QuestionContentValidationDto = CreateQuestionDto &
+  Partial<Pick<UpdateQuestionDto, 'removeAlternative1Image' | 'removeAlternative2Image' | 'removeAlternative3Image' | 'removeAlternative4Image' | 'removeAlternative5Image'>>;
 
 @Injectable()
 export class QuestionsService {
@@ -64,6 +69,7 @@ export class QuestionsService {
 
     await this.ensureRelatedEntitiesAreAvailable(createQuestionDto);
     await this.ensureSkillsAreAvailable(subject.id, createQuestionDto.skillIds ?? []);
+    this.ensureAlternativeContentsAreValid(createQuestionDto, files);
 
     const question = this.questionsRepository.create({
       subjectId: subject.id,
@@ -72,21 +78,21 @@ export class QuestionsService {
       institutionId: createQuestionDto.institutionId,
       educationalLevelId: createQuestionDto.educationalLevelId,
       year: createQuestionDto.year,
-      question: createQuestionDto.question.trim(),
+      question: this.normalizeContent(createQuestionDto.question),
       image: null,
-      alternative1: createQuestionDto.alternative1.trim(),
+      alternative1: this.normalizeContent(createQuestionDto.alternative1),
       alternative1Image: null,
       alternative1Correct: this.resolveCorrectFlag(createQuestionDto.correctAlternative, 1),
-      alternative2: createQuestionDto.alternative2.trim(),
+      alternative2: this.normalizeContent(createQuestionDto.alternative2),
       alternative2Image: null,
       alternative2Correct: this.resolveCorrectFlag(createQuestionDto.correctAlternative, 2),
-      alternative3: createQuestionDto.alternative3.trim(),
+      alternative3: this.normalizeContent(createQuestionDto.alternative3),
       alternative3Image: null,
       alternative3Correct: this.resolveCorrectFlag(createQuestionDto.correctAlternative, 3),
-      alternative4: createQuestionDto.alternative4.trim(),
+      alternative4: this.normalizeContent(createQuestionDto.alternative4),
       alternative4Image: null,
       alternative4Correct: this.resolveCorrectFlag(createQuestionDto.correctAlternative, 4),
-      alternative5: createQuestionDto.alternative5.trim(),
+      alternative5: this.normalizeContent(createQuestionDto.alternative5),
       alternative5Image: null,
       alternative5Correct: this.resolveCorrectFlag(createQuestionDto.correctAlternative, 5),
     });
@@ -197,22 +203,23 @@ export class QuestionsService {
 
     await this.ensureRelatedEntitiesAreAvailable(updateQuestionDto);
     await this.ensureSkillsAreAvailable(subject.id, updateQuestionDto.skillIds ?? []);
+    this.ensureAlternativeContentsAreValid(updateQuestionDto, files, question);
 
     question.roleId = updateQuestionDto.roleId;
     question.boardId = updateQuestionDto.boardId;
     question.institutionId = updateQuestionDto.institutionId;
     question.educationalLevelId = updateQuestionDto.educationalLevelId;
     question.year = updateQuestionDto.year;
-    question.question = updateQuestionDto.question.trim();
-    question.alternative1 = updateQuestionDto.alternative1.trim();
+    question.question = this.normalizeContent(updateQuestionDto.question);
+    question.alternative1 = this.normalizeContent(updateQuestionDto.alternative1);
     question.alternative1Correct = this.resolveCorrectFlag(updateQuestionDto.correctAlternative, 1);
-    question.alternative2 = updateQuestionDto.alternative2.trim();
+    question.alternative2 = this.normalizeContent(updateQuestionDto.alternative2);
     question.alternative2Correct = this.resolveCorrectFlag(updateQuestionDto.correctAlternative, 2);
-    question.alternative3 = updateQuestionDto.alternative3.trim();
+    question.alternative3 = this.normalizeContent(updateQuestionDto.alternative3);
     question.alternative3Correct = this.resolveCorrectFlag(updateQuestionDto.correctAlternative, 3);
-    question.alternative4 = updateQuestionDto.alternative4.trim();
+    question.alternative4 = this.normalizeContent(updateQuestionDto.alternative4);
     question.alternative4Correct = this.resolveCorrectFlag(updateQuestionDto.correctAlternative, 4);
-    question.alternative5 = updateQuestionDto.alternative5.trim();
+    question.alternative5 = this.normalizeContent(updateQuestionDto.alternative5);
     question.alternative5Correct = this.resolveCorrectFlag(updateQuestionDto.correctAlternative, 5);
 
     await this.applyUploadedImages(courseId, subject.id, question, files, updateQuestionDto);
@@ -349,6 +356,74 @@ export class QuestionsService {
 
   private resolveCorrectFlag(correctAlternative: number, alternativeNumber: number): 'Y' | 'N' {
     return correctAlternative === alternativeNumber ? 'Y' : 'N';
+  }
+
+  private normalizeContent(value?: string) {
+    return value?.trim() ?? '';
+  }
+
+  private hasContent(value?: string, imageFile?: QuestionImageFile, existingImage?: string | null, removeImage?: boolean) {
+    return Boolean(this.normalizeContent(value) || imageFile || (existingImage && !removeImage));
+  }
+
+  private ensureAlternativeContentsAreValid(
+    dto: QuestionContentValidationDto,
+    files: QuestionUploadedFiles | undefined,
+    question?: Question,
+  ) {
+    const alternativeChecks = [
+      {
+        number: 1,
+        value: dto.alternative1,
+        imageFile: files?.alternative1Image?.[0],
+        existingImage: question?.alternative1Image,
+        removeImage: dto.removeAlternative1Image,
+      },
+      {
+        number: 2,
+        value: dto.alternative2,
+        imageFile: files?.alternative2Image?.[0],
+        existingImage: question?.alternative2Image,
+        removeImage: dto.removeAlternative2Image,
+      },
+      {
+        number: 3,
+        value: dto.alternative3,
+        imageFile: files?.alternative3Image?.[0],
+        existingImage: question?.alternative3Image,
+        removeImage: dto.removeAlternative3Image,
+      },
+      {
+        number: 4,
+        value: dto.alternative4,
+        imageFile: files?.alternative4Image?.[0],
+        existingImage: question?.alternative4Image,
+        removeImage: dto.removeAlternative4Image,
+      },
+      {
+        number: 5,
+        value: dto.alternative5,
+        imageFile: files?.alternative5Image?.[0],
+        existingImage: question?.alternative5Image,
+        removeImage: dto.removeAlternative5Image,
+      },
+    ] as const;
+
+    alternativeChecks.forEach((alternative) => {
+      if (this.hasContent(alternative.value, alternative.imageFile, alternative.existingImage, alternative.removeImage)) {
+        return;
+      }
+
+      if (alternative.number === 5) {
+        if (dto.correctAlternative === 5) {
+          throw new BadRequestException('Insira o conteúdo da Alternativa 5.)');
+        }
+
+        return;
+      }
+
+      throw new BadRequestException(`Insira o conteúdo da Alternativa ${alternative.number}.`);
+    });
   }
 
   private async applyUploadedImages(

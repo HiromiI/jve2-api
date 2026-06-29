@@ -81,28 +81,28 @@ export class CreateQuestionDto {
   question: string;
 
   @Transform(({ value }) => trimToUndefined(value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   alternative1: string;
 
   @Transform(({ value }) => trimToUndefined(value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   alternative2: string;
 
   @Transform(({ value }) => trimToUndefined(value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   alternative3: string;
 
   @Transform(({ value }) => trimToUndefined(value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   alternative4: string;
 
   @Transform(({ value }) => trimToUndefined(value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
   alternative5: string;
 
   @Type(() => Number)

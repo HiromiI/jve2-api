@@ -23,11 +23,25 @@ export class CreateUserDto {
   @MaxLength(255)
   name: string;
 
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
-  @IsEmail()
+  @Transform(({ value }) => (typeof value === 'string' ? value.trim() : value))
+  @IsString()
   @IsNotEmpty()
+  @MaxLength(20)
+  phone: string;
+
+  @Transform(({ value }) => {
+    if (typeof value !== 'string') {
+      return value;
+    }
+
+    const normalizedValue = value.trim().toLowerCase();
+
+    return normalizedValue === '' ? undefined : normalizedValue;
+  })
+  @IsOptional()
+  @IsEmail()
   @MaxLength(255)
-  email: string;
+  email?: string;
 
   @IsString()
   @IsNotEmpty()

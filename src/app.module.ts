@@ -7,8 +7,10 @@ import { AuthModule } from './auth/auth.module';
 import { BoardsModule } from './boards/boards.module';
 import { CoursesModule } from './courses/courses.module';
 import { EducationalLevelsModule } from './educational_levels/educational_levels.module';
+import { ExamsModule } from './exams/exams.module';
 import { InstitutionsModule } from './institutions/institutions.module';
 import { QuestionsModule } from './questions/questions.module';
+import { PaymentsModule } from './payments/payments.module';
 import { RolesModule } from './roles/roles.module';
 import { SkillsModule } from './skills/skills.module';
 import { SubjectsModule } from './subjects/subjects.module';
@@ -72,8 +74,10 @@ const ensureDatabaseExists = async (configService: ConfigService) => {
     BoardsModule,
     CoursesModule,
     EducationalLevelsModule,
+    ExamsModule,
     InstitutionsModule,
     QuestionsModule,
+    PaymentsModule,
     RolesModule,
     SkillsModule,
     SubjectsModule,

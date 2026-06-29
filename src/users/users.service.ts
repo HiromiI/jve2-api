@@ -8,6 +8,7 @@ import { InjectRepository } from '@nestjs/typeorm';
 import * as bcrypt from 'bcrypt';
 import { IsNull, Repository } from 'typeorm';
 import { Course } from '../courses/entities/course.entity';
+import { PaymentsService } from '../payments/payments.service';
 import { Subject } from '../subjects/entities/subject.entity';
 import { CreateUserDto } from './dto/create-user.dto';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
@@ -31,22 +32,48 @@ export class UsersService {
     private readonly subjectsRepository: Repository<Subject>,
     @InjectRepository(Course)
     private readonly coursesRepository: Repository<Course>,
+    private readonly paymentsService: PaymentsService,
   ) {}
 
   async create(createUserDto: CreateUserDto) {
-    const existingUser = await this.usersRepository.findOne({
-      where: { email: createUserDto.email },
-      withDeleted: true,
-    });
+    const normalizedPhone = this.normalizePhone(createUserDto.phone);
+    const normalizedEmail = this.normalizeEmail(createUserDto.email);
+    if (createUserDto.role === UserRole.STUDENT) {
+      const existingStudentWithPhone = await this.usersRepository.findOne({
+        where: {
+          phone: normalizedPhone,
+          role: UserRole.STUDENT,
+          active: true,
+          deletedAt: IsNull(),
+        },
+      });
 
-    if (existingUser) {
-      throw new ConflictException('E-mail já cadastrado para outro Usuário.');
+      if (existingStudentWithPhone) {
+        throw new ConflictException({
+          code: 'PHONE_ALREADY_REGISTERED',
+          message: 'Telefone já cadastrado para outro Usuário.',
+        });
+      }
+    }
+
+    if (normalizedEmail) {
+      const existingUserWithEmail = await this.usersRepository.findOne({
+        where: {
+          email: normalizedEmail,
+        },
+        withDeleted: true,
+      });
+
+      if (existingUserWithEmail) {
+        throw new ConflictException('E-mail já cadastrado para outro Usuário.');
+      }
     }
 
     const password = await bcrypt.hash(createUserDto.password, 10);
     const user = this.usersRepository.create({
       name: createUserDto.name,
-      email: createUserDto.email,
+      phone: normalizedPhone,
+      email: normalizedEmail,
       password,
       active: createUserDto.active ?? true,
       role: createUserDto.role,
@@ -94,14 +121,18 @@ export class UsersService {
 
   async update(id: number, updateUserDto: UpdateUserDto, authenticatedUserId: number) {
     const user = await this.findActiveEntityById(id);
+    const normalizedPhone = this.normalizePhone(updateUserDto.phone);
+    const normalizedEmail = this.normalizeEmail(updateUserDto.email);
 
     const existingUserWithEmail = await this.usersRepository.findOne({
-      where: { email: updateUserDto.email },
+      where: normalizedEmail
+        ? [{ email: normalizedEmail }, { phone: normalizedPhone }]
+        : [{ phone: normalizedPhone }],
       withDeleted: true,
     });
 
     if (existingUserWithEmail && existingUserWithEmail.id !== id) {
-      throw new ConflictException('E-mail já cadastrado para outro Usuário.');
+      throw new ConflictException('E-mail ou telefone já cadastrado para outro Usuário.');
     }
 
     const isEditingOwnUser = id === authenticatedUserId;
@@ -111,7 +142,8 @@ export class UsersService {
     }
 
     user.name = updateUserDto.name;
-    user.email = updateUserDto.email;
+    user.phone = normalizedPhone;
+    user.email = normalizedEmail;
     user.role = updateUserDto.role;
 
     if (updateUserDto.password) {
@@ -142,6 +174,24 @@ export class UsersService {
     };
   }
 
+  async deleteAccount(userId: number) {
+    const user = await this.findActiveEntityById(userId);
+    const activePayments = await this.paymentsService.cancelActiveSubscriptionsForUser(user.id);
+    const deletedAt = new Date();
+
+    await this.paymentsService.archivePayments(activePayments, deletedAt);
+
+    user.active = false;
+    user.deletedAt = deletedAt;
+
+    await this.usersRepository.save(user);
+    await this.syncUserSubjects(user.id, []);
+
+    return {
+      message: 'Conta excluida com sucesso!',
+    };
+  }
+
   async findEntityById(id: number) {
     const user = await this.usersRepository.findOne({
       where: { id },
@@ -155,13 +205,54 @@ export class UsersService {
   }
 
   async findByEmail(email: string) {
+    const normalizedEmail = this.normalizeEmail(email);
+
+    if (!normalizedEmail) {
+      return null;
+    }
+
     return this.usersRepository.findOne({
       where: {
-        email: email.trim().toLowerCase(),
+        email: normalizedEmail,
         active: true,
         deletedAt: IsNull(),
       },
     });
+  }
+
+  async findByPhone(phone: string) {
+    return this.usersRepository.findOne({
+      where: {
+        phone: this.normalizePhone(phone),
+        role: UserRole.STUDENT,
+        active: true,
+        deletedAt: IsNull(),
+      },
+    });
+  }
+
+  async updatePasswordByPhone(phone: string, password: string) {
+    const user = await this.findByPhone(phone);
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado.');
+    }
+
+    user.password = await bcrypt.hash(password, 10);
+
+    return this.usersRepository.save(user);
+  }
+
+  async setPasswordHashByPhone(phone: string, passwordHash: string) {
+    const user = await this.findByPhone(phone);
+
+    if (!user) {
+      throw new NotFoundException('Usuário não encontrado.');
+    }
+
+    user.password = passwordHash;
+
+    return this.usersRepository.save(user);
   }
 
   private async findActiveEntityById(id: number) {
@@ -277,5 +368,19 @@ export class UsersService {
     });
 
     return userIdToSubjectIds;
+  }
+
+  private normalizeEmail(email?: string | null) {
+    if (typeof email !== 'string') {
+      return null;
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    return normalizedEmail === '' ? null : normalizedEmail;
+  }
+
+  private normalizePhone(phone: string) {
+    return phone.replace(/\D/g, '').trim();
   }
 }

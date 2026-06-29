@@ -8,6 +8,7 @@ import {
   Patch,
   Post,
   Query,
+  Req,
   UploadedFile,
   UseGuards,
   UseInterceptors,
@@ -21,6 +22,12 @@ import { ListCoursesQueryDto } from './dto/list-courses-query.dto';
 import { UpdateCourseDto } from './dto/update-course.dto';
 import { CourseImageFile } from './interfaces/course-image-file.interface';
 
+type AuthenticatedRequest = {
+  user: {
+    userId: number;
+  };
+};
+
 @UseGuards(JwtAuthGuard)
 @Controller('courses')
 export class CoursesController {
@@ -29,6 +36,21 @@ export class CoursesController {
   @Get()
   findAll(@Query() query: ListCoursesQueryDto) {
     return this.coursesService.findAll(query);
+  }
+
+  @Get('store')
+  findStoreCourses(@Req() request: AuthenticatedRequest, @Query() query: ListCoursesQueryDto) {
+    return this.coursesService.findStoreCourses(query, request.user.userId);
+  }
+
+  @Get('user-courses')
+  findUserCourses(@Req() request: AuthenticatedRequest, @Query() query: ListCoursesQueryDto) {
+    return this.coursesService.findUserCourses(query, request.user.userId);
+  }
+
+  @Get('user-exam-courses')
+  findUserExamCourses(@Req() request: AuthenticatedRequest, @Query() query: ListCoursesQueryDto) {
+    return this.coursesService.findUserExamCourses(query, request.user.userId);
   }
 
   @Get(':id')
